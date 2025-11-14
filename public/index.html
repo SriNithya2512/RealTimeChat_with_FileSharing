@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Real-time Chat with File Sharing</title>
+
+  <!-- <<< CSS left exactly as provided by you (no changes) >>> -->
+  <style>
+    body {
+      font-family: Arial, sans-serif; 
+      background-image: url(Screenshot\ 2025-11-07\ 202858.png); 
+      background-repeat: no-repeat; 
+      background-size: cover; margin:0 ;
+      padding: 0; 
+    }
+
+    .chat-container {
+      width: 80%; 
+      margin: 50px auto;
+      /* background: white; */ 
+      background-color: rgba(255, 255, 255, 0.5);
+      padding: 20px; 
+      border-radius: 8px; 
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    #messages {
+      list-style-type: none;
+      padding: 0; 
+      max-height: 300px; overflow-y: auto;
+      margin-bottom: 20px;
+    }
+    #messages li {
+      padding: 8px; 
+      background: #f9f9f9;
+      margin-bottom: 8px; 
+      border-radius: 4px; 
+    }
+    #users{
+      list-style-type: none; 
+      padding: 0; margin-bottom: 20px;
+    }
+    #users li{ 
+      padding: 8px; 
+      background: #f9f9f9;
+      margin-bottom: 8px; 
+      border-radius: 4px; 
+      cursor: pointer;
+    }
+    #input, #fileInput{
+      width: 90%;
+      padding: 20px; 
+      margin-top: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background-color: rgba(255, 255, 255, 0.5);
+    }
+    #broadcastInput, #privateInput,#usernameInput ,#privateUser,#fileRecipient{
+      padding: 15px;
+      border-radius: 0.5rem; 
+      border: none;
+      background-color: rgba(255, 255, 255, 0.5);
+    }
+    #sendBroadcast, #sendPrivate, #sendFile, #setUserameButton{
+      margin-top: 20px;
+      cursor: pointer;
+      padding: 0.5rem; 
+      background-color: blue;
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 0.5rem;
+    }
+  </style>
+  <!-- <<< end CSS >>> -->
+</head>
+<body>
+  <div class="chat-container">
+    <h2>Real-time Chat with File Sharing</h2>
+
+    <div id="setUsername">
+      <input id="usernameInput" placeholder="Enter your username" />
+      <button id="setUsernameButton">Set Username</button>
+    </div>
+
+    <h3>Connected Users:</h3>
+    <ul id="users"></ul>
+
+    <h3>Messages:</h3>
+    <ul id="messages"></ul>
+
+    <div id="privateMessage">
+      <input id="privateUser" placeholder="Recipient Username" />
+      <input id="privateInput" placeholder="Private Message" />
+      <button id="sendPrivate">Send Private Message</button>
+    </div>
+
+    <div id="broadcastMessage">
+      <input id="broadcastInput" placeholder="Enter a message to broadcast" />
+      <button id="sendBroadcast">Send to All Users</button>
+    </div>
+
+    <input id="input" autocomplete="off" placeholder="Type a message..." />
+
+    <div id="fileSharing">
+      <input type="file" id="fileInput" />
+      <input id="fileRecipient" placeholder="Recipient Username (leave blank for broadcast)" />
+      <button id="sendFile">Send File</button>
+    </div>
+  </div>
+
+  <!-- socket.io client -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // Keep JS robust: wait for DOM load and guard element access
+    window.addEventListener('load', () => {
+      const socket = io();
+
+      // track username
+      let username = '';
+
+      // helper to safely get element
+      const $ = id => document.getElementById(id);
+
+      // elements (may be null if not present)
+      const setUsernameBtn = $('setUsernameButton');
+      const usernameInput = $('usernameInput');
+      const setUsernameDiv = $('setUsername');
+      const usersListEl = $('users');
+      const messagesEl = $('messages');
+      const mainInput = $('input'); // matches your id
+      const sendPrivateBtn = $('sendPrivate');
+      const privateUserInput = $('privateUser');
+      const privateInput = $('privateInput');
+      const broadcastInput = $('broadcastInput');
+      const sendBroadcastBtn = $('sendBroadcast');
+      const fileInput = $('fileInput');
+      const fileRecipient = $('fileRecipient');
+      const sendFileBtn = $('sendFile');
+
+      // Utility: escape text for HTML
+      function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function appendListMessage(text) {
+        if (!messagesEl) return;
+        const li = document.createElement('li');
+        li.innerHTML = text;
+        messagesEl.appendChild(li);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      // Set username
+      if (setUsernameBtn && usernameInput) {
+        setUsernameBtn.addEventListener('click', () => {
+          const input = usernameInput.value.trim();
+          if (input) {
+            username = input;
+            socket.emit('set username', username);
+            if (setUsernameDiv) setUsernameDiv.style.display = 'none';
+          } else {
+            alert('Please set a username before sending messages.');
+          }
+        });
+      }
+
+      // Update user list from server
+      socket.on('update users', (userList) => {
+        if (!usersListEl) return;
+        usersListEl.innerHTML = '';
+        userList.forEach((user) => {
+          const li = document.createElement('li');
+          li.textContent = user;
+          li.addEventListener('click', () => {
+            if (privateUserInput) privateUserInput.value = user;
+            if (fileRecipient) fileRecipient.value = user;
+          });
+          usersListEl.appendChild(li);
+        });
+      });
+
+      // Display chat message
+      socket.on('chat message', (data) => {
+        // server may send { from, message } or string; handle both
+        let from = '', message = '';
+        if (typeof data === 'string') {
+          message = data;
+        } else if (data && typeof data === 'object') {
+          from = data.from || '';
+          message = data.message || '';
+        }
+        appendListMessage(`<strong>${escapeHtml(from)}</strong>: ${escapeHtml(message)}`);
+      });
+
+      // Display private message
+      socket.on('private message', (data) => {
+        const from = data?.from || '';
+        const message = data?.message || '';
+        appendListMessage(`<em>Private message from ${escapeHtml(from)}:</em> ${escapeHtml(message)}`);
+      });
+
+      // Display broadcast message
+      socket.on('broadcast message', (data) => {
+        const from = data?.from || '';
+        const message = data?.message || (typeof data === 'string' ? data : '');
+        appendListMessage(`<strong>Broadcast message from ${escapeHtml(from)}:</strong> ${escapeHtml(message)}`);
+      });
+
+      // Handle file upload (incoming)
+      socket.on('file upload', (data) => {
+        const { from = '', filename = '', fileType = 'application/octet-stream', content = '', isPrivate = false } = data || {};
+        const li = document.createElement('li');
+        const link = document.createElement('a');
+        link.href = `data:${fileType};base64,${content}`;
+        link.download = filename || 'file';
+        link.textContent = `${isPrivate ? 'Private' : 'Broadcast'} file from ${from}: ${filename}`;
+        li.appendChild(link);
+        if (messagesEl) {
+          messagesEl.appendChild(li);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      });
+
+      // Send chat message by pressing Enter in main input
+      if (mainInput) {
+        mainInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            if (!username) return alert('Set username first');
+            const message = e.target.value;
+            if (message && message.trim()) {
+              // emit string message (server may accept string)
+              socket.emit('chat message', message.trim());
+              e.target.value = '';
+            }
+          }
+        });
+      }
+
+      // Send private message
+      if (sendPrivateBtn) {
+        sendPrivateBtn.addEventListener('click', () => {
+          if (!username) return alert('Set username first');
+          const to = privateUserInput ? privateUserInput.value.trim() : '';
+          const message = privateInput ? privateInput.value.trim() : '';
+          if (!to || !message) {
+            alert('Provide recipient and message.');
+            return;
+          }
+          socket.emit('private message', { to, message });
+          if (privateInput) privateInput.value = '';
+        });
+      }
+
+      // Send broadcast message
+      if (sendBroadcastBtn) {
+        sendBroadcastBtn.addEventListener('click', () => {
+          if (!username) return alert('Set username first');
+          const message = broadcastInput ? broadcastInput.value.trim() : '';
+          if (!message) return;
+          socket.emit('broadcast message',  message );
+          if (broadcastInput) broadcastInput.value = '';
+        });
+      }
+
+      // Send file
+      if (sendFileBtn) {
+        sendFileBtn.addEventListener('click', () => {
+          if (!username) return alert('Set username first');
+          if (!fileInput) return alert('Choose a file first');
+          if (!fileInput.files || !fileInput.files.length) return alert('Choose a file first');
+          const recipient = fileRecipient ? fileRecipient.value.trim() : '';
+          const file = fileInput.files[0];
+          const reader = new FileReader();
+          reader.onload = () => {
+            const content = reader.result.split(',')[1] || '';
+            socket.emit('file upload', {
+              filename: file.name,
+              fileType: file.type || 'application/octet-stream',
+              content,
+              to: recipient || null
+            });
+            // clear inputs
+            fileInput.value = '';
+            if (fileRecipient) fileRecipient.value = '';
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+    }); // end load listener
+  </script>
+</body>
+</html>
